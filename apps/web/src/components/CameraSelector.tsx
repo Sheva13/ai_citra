@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { Camera } from "@/lib/types";
 import { CameraStatusBadge } from "./Status";
 
@@ -18,7 +19,7 @@ export default function CameraSelector({
         {cameras.map((c) => {
           const active = c.id === activeId;
           return (
-            <a
+            <Link
               key={c.id}
               href={`/monitoring?camera=${c.id}`}
               aria-current={active ? "true" : undefined}
@@ -42,7 +43,7 @@ export default function CameraSelector({
               >
                 →
               </span>
-            </a>
+            </Link>
           );
         })}
       </div>

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import AuthGuard from "@/components/AuthGuard";
 import Header from "@/components/Header";
 
 export const metadata: Metadata = { title: "HelmetWatch" };
@@ -9,7 +10,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="id">
       <body>
         <Header />
-        <main className="mx-auto w-full max-w-7xl px-6 py-8">{children}</main>
+        <main className="mx-auto w-full max-w-7xl px-6 py-8">
+          <AuthGuard>{children}</AuthGuard>
+        </main>
       </body>
     </html>
   );

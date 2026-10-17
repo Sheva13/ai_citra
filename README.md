@@ -102,22 +102,36 @@ Jika salah satu langkah belum lengkap, status kamera menunjukkan `error` dengan 
 
 ## Pengembangan lokal
 
+Tanpa Docker (setup yang diuji di repo ini):
+
 ```bash
-# API
-cd services/api && pip install -r requirements.txt && uvicorn app.main:app --reload
+# 0) PostgreSQL lokal: buat database helmet_monitoring, isi DATABASE_URL di .env
+# 1) API
+cd services/api
+pip install -r requirements.txt
+python -m alembic upgrade head
+python -m app.scripts.create_user --email admin@helmetwatch.local --role admin
+python -m app.scripts.seed_demo                # opsional: CAM-01 (webcam) + CAM-02 (phone)
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 
-# Vision worker
-cd services/vision && pip install -r requirements.txt && python -m vision.main
+# 2) Vision worker (kamera dari DB; CAMERA_ID menentukan row)
+cd services/vision
+pip install -r requirements.txt
+python -m vision.main                          # DETECTOR=yolo + MODEL_PATH=ml/models/best.pt
 
-# Web
-cd apps/web && npm install && npm run dev
+# 3) Web
+cd apps/web
+npm install
+npm run dev                                    # buat .env.local dengan NEXT_PUBLIC_API_BASE_URL
 ```
+
+Untuk uji alur lengkap tanpa kamera/model: set `DETECTOR=fake`. Build web sudah diverifikasi di Node 24 (warning engines 22.x saja); Node 22 tetap rekomendasi resmi.
 
 Tes:
 
 ```bash
-pytest                 # backend dan vision
-cd apps/web && npm test
+cd services/vision && pytest    # unit test event processor
+cd apps/web && npm run build    # sekaligus lint + typecheck
 ```
 
 ## Melatih dan mengevaluasi model

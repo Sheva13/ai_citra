@@ -1,19 +1,84 @@
+"use client";
+
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ReviewPill } from "@/components/Status";
-import { MOCK_EVENTS } from "@/lib/mock";
+import { ApiError, listCameras, listEvents } from "@/lib/api";
+import { formatWib, wibDayRange } from "@/lib/format";
+import type { Camera, EventsPage, ReviewStatus } from "@/lib/types";
+
+const PAGE_SIZE = 20;
 
 // Laporan penuh — independen dari ?camera= di /monitoring.
-export default function LogsPage({
-  searchParams,
-}: {
-  searchParams: { kamera?: string; status?: string };
-}) {
-  const camFilter = searchParams.kamera ?? "Semua";
-  const statusFilter = searchParams.status ?? "Semua";
-  const rows = MOCK_EVENTS.filter(
-    (e) =>
-      (camFilter === "Semua" || e.camera_id === camFilter) &&
-      (statusFilter === "Semua" || e.review_status === statusFilter),
+export default function LogsPage() {
+  return (
+    <Suspense fallback={<p className="py-16 text-center text-sm text-muted">Memuat logs…</p>}>
+      <LogsInner />
+    </Suspense>
   );
+}
+
+function LogsInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const kamera = searchParams.get("kamera") ?? "";
+  const status = (searchParams.get("status") ?? "") as ReviewStatus | "";
+  const tanggal = searchParams.get("tanggal") ?? "";
+  const page = Math.max(1, Number(searchParams.get("page") ?? "1") || 1);
+
+  const [cameras, setCameras] = useState<Camera[]>([]);
+  const [data, setData] = useState<EventsPage | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    listCameras()
+      .then((res) => setCameras(res.items))
+      .catch(() => setCameras([]));
+  }, []);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const range = tanggal ? wibDayRange(tanggal) : null;
+      const result = await listEvents({
+        page,
+        pageSize: PAGE_SIZE,
+        cameraId: kamera,
+        status,
+        dateFrom: range?.from,
+        dateTo: range?.to,
+      });
+      setData(result);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Gagal memuat logs");
+    } finally {
+      setLoading(false);
+    }
+  }, [page, kamera, status, tanggal]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  function pushFilters(next: Partial<Record<"kamera" | "status" | "tanggal" | "page", string>>) {
+    const params = new URLSearchParams(searchParams.toString());
+    for (const [key, value] of Object.entries(next)) {
+      if (value) {
+        params.set(key, value);
+      } else {
+        params.delete(key);
+      }
+    }
+    if (!("page" in next)) params.delete("page");
+    const query = params.toString();
+    router.push(`/logs${query ? `?${query}` : ""}`);
+  }
+
+  const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
+  const rows = data?.items ?? [];
 
   return (
     <div className="space-y-5">
@@ -21,22 +86,37 @@ export default function LogsPage({
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Logs</h1>
           <p className="mt-1 text-sm text-muted">
-            {rows.length} kejadian · klik baris untuk detail & review
+            {data ? `${data.total} kejadian` : "Memuat…"} · klik baris untuk detail & review
           </p>
         </div>
-        <form className="flex flex-wrap items-center gap-2 text-sm">
+        <form
+          className="flex flex-wrap items-center gap-2 text-sm"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const form = new FormData(event.currentTarget);
+            pushFilters({
+              kamera: String(form.get("kamera") ?? ""),
+              status: String(form.get("status") ?? ""),
+              tanggal: String(form.get("tanggal") ?? ""),
+            });
+          }}
+        >
           <label className="sr-only" htmlFor="kamera">
             Kamera
           </label>
           <select
             id="kamera"
             name="kamera"
-            defaultValue={camFilter}
+            key={`kamera-${kamera}`}
+            defaultValue={kamera}
             className="rounded-full border border-hairline bg-white px-3.5 py-2"
           >
-            <option>Semua</option>
-            <option value="cam-01">CAM-01 · Parkiran Depan</option>
-            <option value="cam-02">CAM-02 · Gerbang Masuk</option>
+            <option value="">Semua kamera</option>
+            {cameras.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name} · {c.location}
+              </option>
+            ))}
           </select>
           <label className="sr-only" htmlFor="status">
             Status
@@ -44,19 +124,37 @@ export default function LogsPage({
           <select
             id="status"
             name="status"
-            defaultValue={statusFilter}
+            key={`status-${status}`}
+            defaultValue={status}
             className="rounded-full border border-hairline bg-white px-3.5 py-2"
           >
-            <option>Semua</option>
+            <option value="">Semua status</option>
             <option value="pending">pending</option>
             <option value="confirmed">confirmed</option>
             <option value="false_positive">false positive</option>
           </select>
+          <label className="sr-only" htmlFor="tanggal">
+            Tanggal
+          </label>
+          <input
+            id="tanggal"
+            name="tanggal"
+            type="date"
+            key={`tanggal-${tanggal}`}
+            defaultValue={tanggal}
+            className="mono rounded-full border border-hairline bg-white px-3.5 py-2 text-[13px]"
+          />
           <button className="rounded-full bg-ink px-4 py-2 font-medium text-white hover:opacity-90">
             Filter
           </button>
         </form>
       </div>
+
+      {error ? (
+        <p className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-[#B91C1C]">
+          {error}
+        </p>
+      ) : null}
 
       <div className="overflow-hidden rounded-xl border border-hairline bg-white shadow-card">
         <table className="w-full text-left text-sm">
@@ -71,23 +169,16 @@ export default function LogsPage({
           </thead>
           <tbody className="divide-y divide-hairline">
             {rows.map((e) => (
-              <tr key={e.event_id} className="transition-colors hover:bg-paper">
+              <tr
+                key={e.event_id}
+                className="cursor-pointer transition-colors hover:bg-paper"
+                onClick={() => router.push(`/logs/${e.event_id}`)}
+              >
                 <td className="px-5 py-3.5">
-                  <a
-                    href={`/logs/${e.event_id}`}
-                    className="mono text-[13px] font-medium hover:underline"
-                  >
-                    {e.event_id.slice(0, 6)}…
-                  </a>
+                  <span className="mono text-[13px] font-medium">{e.event_id.slice(0, 6)}…</span>
                 </td>
                 <td className="mono px-5 py-3.5 text-[13px] text-muted">
-                  {new Date(e.detected_at).toLocaleString("id-ID", {
-                    timeZone: "Asia/Jakarta",
-                    day: "2-digit",
-                    month: "short",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
+                  {formatWib(e.detected_at, { year: undefined })}
                 </td>
                 <td className="px-5 py-3.5">
                   <span className="block font-medium">{e.camera_name}</span>
@@ -101,14 +192,38 @@ export default function LogsPage({
             ))}
           </tbody>
         </table>
-        {rows.length === 0 ? (
+        {!loading && rows.length === 0 ? (
           <p className="px-5 py-10 text-center text-sm text-muted">
             Belum ada kejadian untuk filter ini.
           </p>
         ) : null}
+        {loading ? (
+          <p className="px-5 py-10 text-center text-sm text-muted">Memuat…</p>
+        ) : null}
       </div>
 
-      <p className="text-center text-[13px] text-muted">‹ 1 › · 20 per halaman</p>
+      <div className="flex items-center justify-center gap-3 text-[13px] text-muted">
+        <button
+          type="button"
+          disabled={page <= 1 || loading}
+          onClick={() => pushFilters({ page: String(page - 1) })}
+          className="rounded-full border border-hairline px-3 py-1 disabled:opacity-40"
+        >
+          ‹
+        </button>
+        <span>
+          Halaman {page} / {totalPages}
+        </span>
+        <button
+          type="button"
+          disabled={page >= totalPages || loading}
+          onClick={() => pushFilters({ page: String(page + 1) })}
+          className="rounded-full border border-hairline px-3 py-1 disabled:opacity-40"
+        >
+          ›
+        </button>
+        <span className="text-muted">· {PAGE_SIZE} per halaman</span>
+      </div>
     </div>
   );
 }
