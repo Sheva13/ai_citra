@@ -1,0 +1,65 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./services/api
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./storage:/app/storage
+    ports:
+      - "8000:8000"
+
+  # Pola multi-kamera: 1 kamera = 1 worker. MVP jalan 1 worker (CAMERA_ID=CAM-01).
+  # Untuk 2 HP: duplikat service vision-cam1/vision-cam2 dengan CAMERA_ID berbeda,
+  # atau: docker compose up --scale vision=2 dengan CAMERA_ID via DB/API.
+  vision:
+    build: ./services/vision
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      CAMERA_ID: ${CAMERA_ID:-CAM-01}
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_started
+    volumes:
+      - ./storage:/app/storage
+      - ./ml/models:/app/ml/models:ro
+    # GPU opsional: hapus komentar di bawah dan set INFERENCE_DEVICE=cuda:0
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  web:
+    build: ./apps/web
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:
